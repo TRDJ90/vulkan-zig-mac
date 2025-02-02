@@ -1,4 +1,4 @@
-A small test project for the https://github.com/Snektron/vulkan-zig example triangle code.
+A small test project for future references it uses the https://github.com/Snektron/vulkan-zig example triangle code.
 But the glfw3 lib is replaced with zig-gamedev zglfw and made it runnable on macos.
 To make the triangle example run on mac we need to set the correct vulkan instance and device extensions. 
 
