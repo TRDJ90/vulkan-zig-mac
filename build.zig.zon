@@ -1,0 +1,25 @@
+.{
+    .name = "vulkan-zig-mac",
+    .version = "0.0.0",
+    .minimum_zig_version = "0.14.0",
+
+    .dependencies = .{
+        .zglfw = .{
+            .url = "https://github.com/zig-gamedev/zglfw/archive/1c8f7de20bb01076c94582e22d9393a8d6bf30fe.tar.gz",
+            .hash = "1220aac39fd472cb7a70b1987249f3ac73799e702ff27516d799e1d5e566097f0a8b",
+        },
+        .vulkan_headers = .{
+            .url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/heads/main.zip",
+            .hash = "1220a11136d20a5580bac95fd7a4ed4f1c50c3e37a90350fa45334e0c2062008ce6c",
+        },
+        .vulkan = .{
+            .url = "https://github.com/Snektron/vulkan-zig/archive/1fd5a6e217dfcc7e4406d449924a1feb1ecffbb9.tar.gz",
+            .hash = "122096b4021c4bb35d373d589a31237e2ac834969ea50401d73cc50780aaec8ea367",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
