@@ -9,6 +9,9 @@ builds debug build and run it.
   zig build run
 ```
 
+
+If just is installed we can use these commands
+
 runs debug build
 ```
   just run
