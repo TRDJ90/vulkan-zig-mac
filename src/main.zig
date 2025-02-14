@@ -47,12 +47,7 @@ pub fn main() !void {
     try zglfw.init();
     defer zglfw.terminate();
 
-    if (zglfw.isVulkanSupported() != true) {
-        std.log.err("ZGlfw could not find libvulkan", .{});
-        return error.NoVulkan;
-    }
-
-    var extent = vk.Extent2D{ .width = 800, .height = 600 };
+    var extent = vk.Extent2D{ .width = 1280, .height = 720 };
 
     zglfw.windowHint(zglfw.WindowHint.client_api, zglfw.ClientApi.no_api);
     const window = try zglfw.createWindow(

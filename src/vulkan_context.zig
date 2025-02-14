@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const vk = @import("vulkan");
 const zglfw = @import("zglfw");
 const Allocator = std.mem.Allocator;
@@ -11,13 +12,70 @@ const apis: []const vk.ApiInfo = &.{
     .{
         .base_commands = .{
             .createInstance = true,
+            .getInstanceProcAddr = true,
+            .enumerateInstanceLayerProperties = true,
         },
         .instance_commands = .{
             .createDevice = true,
+            .destroyInstance = true,
+            .enumeratePhysicalDevices = true,
+            .getDeviceProcAddr = true,
+            .getPhysicalDeviceProperties = true,
+            .getPhysicalDeviceFeatures = true,
+            .getPhysicalDeviceQueueFamilyProperties = true,
+            .enumerateDeviceExtensionProperties = true,
+            .getPhysicalDeviceMemoryProperties = true,
+        },
+        .device_commands = .{
+            .destroyDevice = true,
+            .getDeviceQueue = true,
+            .queueSubmit = true,
+            .queueWaitIdle = true,
+            .deviceWaitIdle = true,
+            .allocateMemory = true,
+            .freeMemory = true,
+            .mapMemory = true,
+            .unmapMemory = true,
+            .getBufferMemoryRequirements = true,
+            .bindBufferMemory = true,
+            .createFence = true,
+            .destroyFence = true,
+            .destroyBuffer = true,
+            .createImageView = true,
+            .resetFences = true,
+            .waitForFences = true,
+            .createSemaphore = true,
+            .destroySemaphore = true,
+            .createBuffer = true,
+            .destroyImageView = true,
+            .createShaderModule = true,
+            .destroyShaderModule = true,
+            .createGraphicsPipelines = true,
+            .destroyPipeline = true,
+            .createPipelineLayout = true,
+            .destroyPipelineLayout = true,
+            .createFramebuffer = true,
+            .destroyFramebuffer = true,
+            .createRenderPass = true,
+            .destroyRenderPass = true,
+            .createCommandPool = true,
+            .destroyCommandPool = true,
+            .allocateCommandBuffers = true,
+            .freeCommandBuffers = true,
+            .beginCommandBuffer = true,
+            .endCommandBuffer = true,
+            .cmdBindPipeline = true,
+            .cmdSetViewport = true,
+            .cmdSetScissor = true,
+            .cmdDraw = true,
+            .cmdCopyBuffer = true,
+            .cmdBeginRenderPass = true,
+            .cmdEndRenderPass = true,
+            .cmdBindVertexBuffers = true,
         },
     },
     // Or you can add entire feature sets or extensions
-    vk.features.version_1_0,
+    // vk.features.version_1_2,
     vk.extensions.khr_surface,
     vk.extensions.khr_swapchain,
     // vk.extensions.khr_portability_enumeration,
@@ -31,6 +89,52 @@ const DeviceDispatch = vk.DeviceWrapper(apis);
 // Also create some proxying wrappers, which also have the respective handles
 const Instance = vk.InstanceProxy(apis);
 const Device = vk.DeviceProxy(apis);
+
+const VulkanLoader = struct {
+    const dll_names = switch (builtin.os.tag) {
+        .windows => &[_][]const u8{
+            "vulkan-1.dll",
+        },
+        .ios, .macos, .tvos, .watchos => &[_][]const u8{
+            "libvulkan.dylib",
+            "libvulkan.1.dylib",
+            "libMoltenVK.dylib",
+        },
+        .linux => &[_][]const u8{
+            "libvulkan.so.1",
+            "libvulkan.so",
+        },
+        else => &[_][]const u8{
+            "libvulkan.so.1",
+            "libvulkan.so",
+        },
+    };
+
+    handle: std.DynLib,
+    get_instance_proc_addr: vk.PfnGetInstanceProcAddr,
+
+    pub fn loadVulkan() !VulkanLoader {
+        var handle: std.DynLib = undefined;
+        var get_instance_proc_addr: vk.PfnGetInstanceProcAddr = undefined;
+
+        for (dll_names) |name| {
+            if (std.DynLib.open(name)) |library| {
+                handle = library;
+                break;
+            } else |err| {
+                std.log.err("{any}", .{err});
+            }
+        }
+
+        errdefer handle.close();
+        get_instance_proc_addr = handle.lookup(vk.PfnGetInstanceProcAddr, "vkGetInstanceProcAddr") orelse return error.LoadVulkanFailed;
+
+        return VulkanLoader{
+            .handle = handle,
+            .get_instance_proc_addr = get_instance_proc_addr,
+        };
+    }
+};
 
 pub const GraphicsContext = struct {
     pub const CommandBuffer = vk.CommandBufferProxy(apis);
@@ -50,19 +154,38 @@ pub const GraphicsContext = struct {
     present_queue: Queue,
 
     pub fn init(allocator: Allocator, app_name: [*:0]const u8, window: *zglfw.Window) !GraphicsContext {
+        const vulkan_loader = try VulkanLoader.loadVulkan();
+
         var self: GraphicsContext = undefined;
         self.allocator = allocator;
-        self.vkb = try BaseDispatch.load(glfwGetInstanceProcAddress);
+        self.vkb = try BaseDispatch.load(vulkan_loader.get_instance_proc_addr);
 
         const glfw_exts = try zglfw.getRequiredInstanceExtensions();
+        _ = glfw_exts;
 
-        var extensions = try std.ArrayList([*:0]const u8).initCapacity(allocator, glfw_exts.len);
+        var extensions = try std.ArrayList([*:0]const u8).initCapacity(allocator, 4);
         defer extensions.deinit();
 
-        for (0..glfw_exts.len) |i| {
-            try extensions.append(glfw_exts[i]);
+        // Add OS specific instance extensions.
+        switch (builtin.target.os.tag) {
+            .macos => {
+                try extensions.append(vk.extensions.ext_metal_surface.name);
+                try extensions.append(vk.extensions.khr_portability_enumeration.name);
+            },
+            .windows => {
+                try extensions.append(vk.extensions.khr_win_32_surface.name);
+            },
+            .linux => {
+                try extensions.append(vk.extensions.khr_xcb_surface.name);
+                try extensions.append(vk.extensions.khr_xlib_surface.name);
+                try extensions.append(vk.extensions.khr_wayland_surface.name);
+            },
+            else => {
+                std.log.err("Unsupported platform/os", .{});
+            },
         }
 
+        try extensions.append(vk.extensions.khr_surface.name);
         try extensions.append(vk.extensions.khr_portability_enumeration.name);
 
         const app_info = vk.ApplicationInfo{
@@ -70,7 +193,7 @@ pub const GraphicsContext = struct {
             .application_version = vk.makeApiVersion(0, 0, 0, 0),
             .p_engine_name = app_name,
             .engine_version = vk.makeApiVersion(0, 0, 0, 0),
-            .api_version = vk.API_VERSION_1_2,
+            .api_version = vk.API_VERSION_1_3,
         };
 
         const instance = try self.vkb.createInstance(&.{
@@ -308,6 +431,5 @@ fn checkExtensionSupport(
 
 // usually the GLFW vulkan functions are exported if vulkan is included,
 // but since that's not the case here, they are manually imported.
-pub extern fn glfwGetInstanceProcAddress(instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction;
 pub extern fn glfwGetPhysicalDevicePresentationSupport(instance: vk.Instance, pdev: vk.PhysicalDevice, queuefamily: u32) c_int;
 pub extern fn glfwCreateWindowSurface(instance: vk.Instance, window: *zglfw.Window, allocation_callbacks: ?*const vk.AllocationCallbacks, surface: *vk.SurfaceKHR) vk.Result;
