@@ -2,163 +2,61 @@ const std = @import("std");
 const builtin = @import("builtin");
 const vk = @import("vulkan");
 const zglfw = @import("zglfw");
+const vulkan_util = @import("vulkan_util.zig");
+const VulkanTypes = @import("vulkan_types.zig");
+
+const BaseDispatcher = VulkanTypes.BaseDispatcher;
+const InstanceDispatcher = VulkanTypes.InstanceDispatcher;
+const DeviceDispatcher = VulkanTypes.DeviceDispatcher;
+
+const Instance = VulkanTypes.Instance;
+const Device = VulkanTypes.Device;
+
 const Allocator = std.mem.Allocator;
+const VulkanLoader = vulkan_util.VulkanLoader;
 
-const required_device_extensions = [_][*:0]const u8{vk.extensions.khr_swapchain.name};
-
-/// To construct base, instance and device wrappers for vulkan-zig, you need to pass a list of 'apis' to it.
-const apis: []const vk.ApiInfo = &.{
-    // You can either add invidiual functions by manually creating an 'api'
-    .{
-        .base_commands = .{
-            .createInstance = true,
-            .getInstanceProcAddr = true,
-            .enumerateInstanceLayerProperties = true,
-        },
-        .instance_commands = .{
-            .createDevice = true,
-            .destroyInstance = true,
-            .enumeratePhysicalDevices = true,
-            .getDeviceProcAddr = true,
-            .getPhysicalDeviceProperties = true,
-            .getPhysicalDeviceFeatures = true,
-            .getPhysicalDeviceQueueFamilyProperties = true,
-            .enumerateDeviceExtensionProperties = true,
-            .getPhysicalDeviceMemoryProperties = true,
-        },
-        .device_commands = .{
-            .destroyDevice = true,
-            .getDeviceQueue = true,
-            .queueSubmit = true,
-            .queueWaitIdle = true,
-            .deviceWaitIdle = true,
-            .allocateMemory = true,
-            .freeMemory = true,
-            .mapMemory = true,
-            .unmapMemory = true,
-            .getBufferMemoryRequirements = true,
-            .bindBufferMemory = true,
-            .createFence = true,
-            .destroyFence = true,
-            .destroyBuffer = true,
-            .createImageView = true,
-            .resetFences = true,
-            .waitForFences = true,
-            .createSemaphore = true,
-            .destroySemaphore = true,
-            .createBuffer = true,
-            .destroyImageView = true,
-            .createShaderModule = true,
-            .destroyShaderModule = true,
-            .createGraphicsPipelines = true,
-            .destroyPipeline = true,
-            .createPipelineLayout = true,
-            .destroyPipelineLayout = true,
-            .createFramebuffer = true,
-            .destroyFramebuffer = true,
-            .createRenderPass = true,
-            .destroyRenderPass = true,
-            .createCommandPool = true,
-            .destroyCommandPool = true,
-            .allocateCommandBuffers = true,
-            .freeCommandBuffers = true,
-            .beginCommandBuffer = true,
-            .endCommandBuffer = true,
-            .cmdBindPipeline = true,
-            .cmdSetViewport = true,
-            .cmdSetScissor = true,
-            .cmdDraw = true,
-            .cmdCopyBuffer = true,
-            .cmdBeginRenderPass = true,
-            .cmdEndRenderPass = true,
-            .cmdBindVertexBuffers = true,
-        },
-    },
-    // Or you can add entire feature sets or extensions
-    // vk.features.version_1_2,
-    vk.extensions.khr_surface,
-    vk.extensions.khr_swapchain,
-    // vk.extensions.khr_portability_enumeration,
+const required_device_extensions = [_][*:0]const u8{
+    vk.extensions.khr_swapchain.name,
+    vk.extensions.khr_portability_subset.name,
 };
 
-/// Next, pass the `apis` to the wrappers to create dispatch tables.
-const BaseDispatch = vk.BaseWrapper(apis);
-const InstanceDispatch = vk.InstanceWrapper(apis);
-const DeviceDispatch = vk.DeviceWrapper(apis);
+const validation_layers = [_][]const u8{
+    "VK_LAYER_KHRONOS_validation",
+};
 
-// Also create some proxying wrappers, which also have the respective handles
-const Instance = vk.InstanceProxy(apis);
-const Device = vk.DeviceProxy(apis);
-
-const VulkanLoader = struct {
-    const dll_names = switch (builtin.os.tag) {
-        .windows => &[_][]const u8{
-            "vulkan-1.dll",
-        },
-        .ios, .macos, .tvos, .watchos => &[_][]const u8{
-            "libvulkan.dylib",
-            "libvulkan.1.dylib",
-            "libMoltenVK.dylib",
-        },
-        .linux => &[_][]const u8{
-            "libvulkan.so.1",
-            "libvulkan.so",
-        },
-        else => &[_][]const u8{
-            "libvulkan.so.1",
-            "libvulkan.so",
-        },
-    };
-
-    handle: std.DynLib,
-    get_instance_proc_addr: vk.PfnGetInstanceProcAddr,
-
-    pub fn loadVulkan() !VulkanLoader {
-        var handle: std.DynLib = undefined;
-        var get_instance_proc_addr: vk.PfnGetInstanceProcAddr = undefined;
-
-        for (dll_names) |name| {
-            if (std.DynLib.open(name)) |library| {
-                handle = library;
-                break;
-            } else |err| {
-                std.log.err("{any}", .{err});
-            }
-        }
-
-        errdefer handle.close();
-        get_instance_proc_addr = handle.lookup(vk.PfnGetInstanceProcAddr, "vkGetInstanceProcAddr") orelse return error.LoadVulkanFailed;
-
-        return VulkanLoader{
-            .handle = handle,
-            .get_instance_proc_addr = get_instance_proc_addr,
-        };
-    }
+pub const InstanceConfig = struct {
+    app_name: [*:0]const u8,
+    engine_name: [*:0]const u8,
+    use_default_debug_messenger: bool,
+    use_debug_messenger: bool,
 };
 
 pub const GraphicsContext = struct {
-    pub const CommandBuffer = vk.CommandBufferProxy(apis);
+    pub const CommandBuffer = VulkanTypes.CommandBuffer;
 
     allocator: Allocator,
 
-    vkb: BaseDispatch,
+    vkb: VulkanTypes.BaseDispatcher,
 
-    instance: Instance,
+    instance: VulkanTypes.Instance,
     surface: vk.SurfaceKHR,
     pdev: vk.PhysicalDevice,
     props: vk.PhysicalDeviceProperties,
     mem_props: vk.PhysicalDeviceMemoryProperties,
 
-    dev: Device,
+    dev: VulkanTypes.Device,
     graphics_queue: Queue,
     present_queue: Queue,
 
-    pub fn init(allocator: Allocator, app_name: [*:0]const u8, window: *zglfw.Window) !GraphicsContext {
+    debug_messenger: vk.DebugUtilsMessengerEXT,
+    debug_messenger_used: bool = false,
+
+    pub fn init(allocator: Allocator, config: InstanceConfig, window: *zglfw.Window) !GraphicsContext {
         const vulkan_loader = try VulkanLoader.loadVulkan();
 
         var self: GraphicsContext = undefined;
         self.allocator = allocator;
-        self.vkb = try BaseDispatch.load(vulkan_loader.get_instance_proc_addr);
+        self.vkb = try BaseDispatcher.load(vulkan_loader.get_instance_proc_addr);
 
         const glfw_exts = try zglfw.getRequiredInstanceExtensions();
         _ = glfw_exts;
@@ -185,44 +83,84 @@ pub const GraphicsContext = struct {
             },
         }
 
+        if (config.use_debug_messenger) {
+            try extensions.append(vk.extensions.ext_debug_utils.name);
+        }
+
         try extensions.append(vk.extensions.khr_surface.name);
-        try extensions.append(vk.extensions.khr_portability_enumeration.name);
 
         const app_info = vk.ApplicationInfo{
-            .p_application_name = app_name,
+            .p_application_name = config.app_name,
             .application_version = vk.makeApiVersion(0, 0, 0, 0),
-            .p_engine_name = app_name,
+            .p_engine_name = config.engine_name,
             .engine_version = vk.makeApiVersion(0, 0, 0, 0),
             .api_version = vk.API_VERSION_1_3,
         };
 
-        const instance = try self.vkb.createInstance(&.{
+        var instance_ci: vk.InstanceCreateInfo = .{
             .p_application_info = &app_info,
             .enabled_extension_count = @intCast(extensions.items.len),
             .pp_enabled_extension_names = @ptrCast(extensions.items),
+            .enabled_layer_count = @intCast(validation_layers.len),
+            .pp_enabled_layer_names = @ptrCast(&validation_layers),
             .flags = vk.InstanceCreateFlags{
                 .enumerate_portability_bit_khr = true,
             },
-        }, null);
+        };
 
-        const vki = try allocator.create(InstanceDispatch);
+        if (config.use_default_debug_messenger) {
+            var default_debug_messenger_ci: vk.DebugUtilsMessengerCreateInfoEXT = .{
+                .s_type = vk.StructureType.debug_utils_messenger_create_info_ext,
+                .message_severity = vk.DebugUtilsMessageSeverityFlagsEXT{
+                    .warning_bit_ext = true,
+                    .info_bit_ext = true,
+                    .error_bit_ext = true,
+                    .verbose_bit_ext = true,
+                },
+                .message_type = vk.DebugUtilsMessageTypeFlagsEXT{
+                    .general_bit_ext = true,
+                    .validation_bit_ext = true,
+                    .performance_bit_ext = true,
+                },
+                .pfn_user_callback = vulkan_util.debugCallBack,
+                .p_user_data = null,
+            };
+            instance_ci.p_next = @as(*vk.DebugUtilsMessengerCreateInfoEXT, &default_debug_messenger_ci);
+            // TODO: should add debug layer over here.
+        }
+
+        const instance = try self.vkb.createInstance(@ptrCast(&instance_ci), null);
+
+        const vki = try allocator.create(InstanceDispatcher);
         errdefer allocator.destroy(vki);
-        vki.* = try InstanceDispatch.load(instance, self.vkb.dispatch.vkGetInstanceProcAddr);
+        vki.* = try InstanceDispatcher.load(instance, self.vkb.dispatch.vkGetInstanceProcAddr);
         self.instance = Instance.init(instance, vki);
         errdefer self.instance.destroyInstance(null);
 
+        // Initialize debug messenger.
+        var debug_messenger: vk.DebugUtilsMessengerEXT = undefined;
+        if (config.use_debug_messenger) {
+            var debug_messenger_ci = vulkan_util.CreateDefaultDebugUtilsCreateInfo();
+            vulkan_util.createDebugUtilsMessenger(self.vkb, instance, &debug_messenger_ci, &debug_messenger);
+            self.debug_messenger = debug_messenger;
+            self.debug_messenger_used = true;
+        }
+        errdefer vulkan_util.destroyDebugUtilsMessenger(self.vkb, instance, debug_messenger);
+
+        // Initialize surface.
         self.surface = try createSurface(self.instance, window);
         errdefer self.instance.destroySurfaceKHR(self.surface, null);
 
+        // Select candidate physical device.
         const candidate = try pickPhysicalDevice(self.instance, allocator, self.surface);
         self.pdev = candidate.pdev;
         self.props = candidate.props;
 
         const dev = try initializeCandidate(self.instance, candidate);
 
-        const vkd = try allocator.create(DeviceDispatch);
+        const vkd = try allocator.create(DeviceDispatcher);
         errdefer allocator.destroy(vkd);
-        vkd.* = try DeviceDispatch.load(dev, self.instance.wrapper.dispatch.vkGetDeviceProcAddr);
+        vkd.* = try DeviceDispatcher.load(dev, self.instance.wrapper.dispatch.vkGetDeviceProcAddr);
         self.dev = Device.init(dev, vkd);
         errdefer self.dev.destroyDevice(null);
 
@@ -237,6 +175,11 @@ pub const GraphicsContext = struct {
     pub fn deinit(self: GraphicsContext) void {
         self.dev.destroyDevice(null);
         self.instance.destroySurfaceKHR(self.surface, null);
+
+        if (self.debug_messenger_used) {
+            vulkan_util.destroyDebugUtilsMessenger(self.vkb, self.instance.handle, self.debug_messenger);
+        }
+
         self.instance.destroyInstance(null);
 
         // Don't forget to free the tables to prevent a memory leak.

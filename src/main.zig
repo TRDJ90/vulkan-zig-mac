@@ -2,7 +2,10 @@ const std = @import("std");
 const vk = @import("vulkan");
 const zglfw = @import("zglfw");
 
-const VulkanContext = @import("vulkan_context.zig").GraphicsContext;
+const Vulkan = @import("vulkan_context.zig");
+const VulkanContext = Vulkan.GraphicsContext;
+const InstanceConfig = Vulkan.InstanceConfig;
+
 const Swapchain = @import("swapchain.zig").Swapchain;
 const Allocator = std.mem.Allocator;
 
@@ -62,7 +65,14 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const gc = try VulkanContext.init(allocator, app_name, window);
+    const instance_config: InstanceConfig = .{
+        .app_name = "vulkan-zig triangle example",
+        .engine_name = "vulkan-zig triangle engine",
+        .use_default_debug_messenger = true,
+        .use_debug_messenger = true,
+    };
+
+    const gc = try VulkanContext.init(allocator, instance_config, window);
     defer gc.deinit();
 
     std.log.debug("Using device: {s}", .{gc.deviceName()});
